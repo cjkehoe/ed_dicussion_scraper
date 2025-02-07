@@ -84,10 +84,38 @@ def login_to_ed():
             # Wait for navigation after login
             page.wait_for_load_state('networkidle')
             
-            # Add a delay before returning to keep the browser open
-            page.wait_for_timeout(5000)  # 5 second delay
+            print("Attempting to find and click CSE 360 course...")
+            # Define course selection query
+            COURSE_QUERY = """
+            {
+                cse360_course(div with class "dash-course-code" and text "CSE 360 - Hybrid and Online - Spring 2025")
+            }
+            """
             
-            print("Login process completed!")
+            try:
+                # Get course element
+                response = page.query_elements(COURSE_QUERY)
+                
+                if not hasattr(response, 'cse360_course'):
+                    print("Failed to find CSE 360 course element!")
+                    print("Available elements:", vars(response))
+                    return None, None, None
+                
+                print("Found CSE 360 course, clicking...")
+                response.cse360_course.click()
+                
+                # Wait for navigation after clicking course
+                page.wait_for_load_state('networkidle')
+                print("Successfully navigated to CSE 360 course page!")
+                
+                # Add a delay to keep the browser open
+                page.wait_for_timeout(5000)  # 5 second delay
+            
+            except Exception as e:
+                print(f"Failed to click course: {str(e)}")
+                return None, None, None
+                
+            print("Navigation process completed!")
             
             return page, browser, playwright
 
