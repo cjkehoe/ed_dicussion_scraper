@@ -9,132 +9,158 @@ load_dotenv()
 # Configure AgentQL with API key
 agentql.configure(api_key=os.getenv('AGENTQL_API_KEY'))
 
-# Ed Discussion login URL
+# Constants
 LOGIN_URL = "https://edstem.org/us/login"
+API_BASE_URL = "https://us.edstem.org/api"
+
+def get_all_thread_links(page, course_id="72657"):
+    """
+    Get all thread links using Ed's API endpoint directly.
+    
+    Args:
+        page: Playwright page object with active session
+        course_id (str): Ed Discussion course ID
+        
+    Returns:
+        list: List of thread URLs, or None if failed
+    """
+    print("Collecting all thread links...")
+    
+    # Get authentication token
+    token = page.evaluate("""() => {
+        return localStorage.getItem('authToken') || localStorage.getItem('authToken:us');
+    }""")
+    
+    if not token:
+        print("Failed to get authentication token")
+        return None
+    
+    headers = {
+        'x-token': token,
+        'accept': 'application/json',
+    }
+    
+    all_threads = []
+    offset = 0
+    limit = 30
+    
+    while True:
+        url = f"{API_BASE_URL}/courses/{course_id}/threads?limit={limit}&offset={offset}&sort=new"
+        print(f"Fetching threads with offset {offset}...")
+        
+        try:
+            response = page.request.get(url, headers=headers)
+            data = response.json()
+            
+            if not data.get('threads'):
+                break
+                
+            threads = data['threads']
+            all_threads.extend([
+                f"https://edstem.org/us/courses/{course_id}/discussion/{thread['id']}"
+                for thread in threads
+            ])
+            
+            if len(threads) < limit:
+                break
+                
+            offset += limit
+            print(f"Collected {len(all_threads)} threads so far...")
+            
+        except Exception as e:
+            print(f"Error fetching threads: {str(e)}")
+            break
+    
+    print(f"Total threads collected: {len(all_threads)}")
+    return all_threads
 
 def login_to_ed():
+    """
+    Log into Ed Discussion and navigate to the CSE 360 course page.
+    
+    Returns:
+        tuple: (page, browser, playwright, thread_links) or (None, None, None, None) if failed
+    """
     playwright = sync_playwright().start()
     
     try:
-        # Modified browser launch configuration - removed channel specification
         browser = playwright.chromium.launch(
             headless=False,
-            args=[
-                '--disable-dev-shm-usage',
-                '--no-sandbox',
-                '--disable-setuid-sandbox'
-            ]
+            args=['--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox']
         )
         
-        # Create a new context first
         context = browser.new_context()
         page = agentql.wrap(context.new_page())
         
-        # Navigate to login page
+        # Login process
         page.goto(LOGIN_URL)
         
-        # Define email form query based on the JSON structure
-        EMAIL_QUERY = """
+        # Email form
+        email_query = """
         {
             email_input(input with class "start-input")
             continue_button(button with class "start-btn")
         }
         """
-        
-        # Get email form elements
-        response = page.query_elements(EMAIL_QUERY)
-        
-        # Fill in email and click continue
+        response = page.query_elements(email_query)
         response.email_input.fill(os.getenv('ED_EMAIL'))
         response.continue_button.click()
         
-        print("Clicked continue, waiting for password form...")
-        # Add a small delay to ensure the password form is loaded
-        page.wait_for_timeout(2000)  # 2 second delay
-        
-        # Wait for navigation after clicking continue
+        # Wait for password form
+        page.wait_for_timeout(2000)
         page.wait_for_load_state('networkidle')
-
-        print("Attempting to find password form elements...")
-        # Define password form query
-        PASSWORD_QUERY = """
+        
+        # Password form
+        password_query = """
         {
             password_input(input with class "start-input" and type "password")
             login_button(button with class "start-btn" and type "submit")
         }
         """
-
-        try:
-            # Get password form elements
-            response = page.query_elements(PASSWORD_QUERY)
+        response = page.query_elements(password_query)
+        response.password_input.fill(os.getenv('ED_PASSWORD'))
+        response.login_button.click()
+        
+        # Wait for navigation and find course
+        page.wait_for_load_state('networkidle')
+        course_query = """
+        {
+            cse360_course(div with class "dash-course-code" and text "CSE 360 - Hybrid and Online - Spring 2025")
+        }
+        """
+        response = page.query_elements(course_query)
+        response.cse360_course.click()
+        
+        # Wait for course page to load
+        page.wait_for_load_state('networkidle')
+        
+        # Get all thread links
+        thread_links = get_all_thread_links(page)
+        if not thread_links:
+            return None, None, None, None
             
-            if not hasattr(response, 'password_input') or not hasattr(response, 'login_button'):
-                print("Failed to find password form elements!")
-                print("Available elements:", vars(response))
-                return None, None, None
-            
-            print("Found password form, attempting to fill and submit...")
-            # Fill in password and click login
-            response.password_input.fill(os.getenv('ED_PASSWORD'))
-            
-            print("Password entered, attempting to click login...")
-            response.login_button.click()
-            
-            print("Login button clicked, waiting for navigation...")
-            # Wait for navigation after login
-            page.wait_for_load_state('networkidle')
-            
-            print("Attempting to find and click CSE 360 course...")
-            # Define course selection query
-            COURSE_QUERY = """
-            {
-                cse360_course(div with class "dash-course-code" and text "CSE 360 - Hybrid and Online - Spring 2025")
-            }
-            """
-            
-            try:
-                # Get course element
-                response = page.query_elements(COURSE_QUERY)
-                
-                if not hasattr(response, 'cse360_course'):
-                    print("Failed to find CSE 360 course element!")
-                    print("Available elements:", vars(response))
-                    return None, None, None
-                
-                print("Found CSE 360 course, clicking...")
-                response.cse360_course.click()
-                
-                # Wait for navigation after clicking course
-                page.wait_for_load_state('networkidle')
-                print("Successfully navigated to CSE 360 course page!")
-                
-                # Add a delay to keep the browser open
-                page.wait_for_timeout(5000)  # 5 second delay
-            
-            except Exception as e:
-                print(f"Failed to click course: {str(e)}")
-                return None, None, None
-                
-            print("Navigation process completed!")
-            
-            return page, browser, playwright
-
-        except Exception as e:
-            print(f"Login failed: {str(e)}")
-            if browser:
-                browser.close()
-            playwright.stop()
-            return None, None, None
+        return page, browser, playwright, thread_links
 
     except Exception as e:
         print(f"Login failed: {str(e)}")
         if browser:
             browser.close()
         playwright.stop()
-        return None, None, None
+        return None, None, None, None
+
+def main():
+    """Main execution function."""
+    page, browser, playwright, thread_links = login_to_ed()
+    try:
+        if thread_links:
+            print("\nCollected thread links:")
+            for i, link in enumerate(thread_links, 1):
+                print(f"{i}. {link}")
+    finally:
+        if browser:
+            browser.close()
+        if playwright:
+            playwright.stop()
 
 if __name__ == "__main__":
-    page, browser, playwright = login_to_ed()
-    if page:
-        browser.close()
-        playwright.stop()  # Clean up playwright
+    main()
