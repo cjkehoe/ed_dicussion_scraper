@@ -148,14 +148,99 @@ def login_to_ed():
         playwright.stop()
         return None, None, None, None
 
+def get_thread_data(page, thread_id):
+    """
+    Fetch detailed data for a specific thread using Ed's API endpoint.
+    
+    Args:
+        page: Playwright page object with active session
+        thread_id (str): Thread ID to fetch
+        
+    Returns:
+        dict: Thread data, or None if failed
+    """
+    print(f"Fetching data for thread {thread_id}...")
+    
+    # Get authentication token
+    token = page.evaluate("""() => {
+        return localStorage.getItem('authToken') || localStorage.getItem('authToken:us');
+    }""")
+    
+    if not token:
+        print("Failed to get authentication token")
+        return None
+    
+    headers = {
+        'x-token': token,
+        'accept': 'application/json',
+    }
+    
+    url = f"{API_BASE_URL}/threads/{thread_id}?view=1"
+    
+    try:
+        response = page.request.get(url, headers=headers)
+        thread_data = response.json()
+        return thread_data
+        
+    except Exception as e:
+        print(f"Error fetching thread data: {str(e)}")
+        return None
+
+def extract_thread_data(thread_data):
+    """
+    Extract relevant data from thread API response.
+    
+    Args:
+        thread_data (dict): Raw API response
+        
+    Returns:
+        dict: Structured thread data
+    """
+    thread = thread_data['thread']
+    
+    # Extract answers
+    answers = []
+    for answer in thread.get('answers', []):
+        answers.append({
+            'id': answer['id'],
+            'content': answer['document'],
+            'is_endorsed': answer['is_endorsed'],
+            'created_at': answer['created_at'],
+            'is_staff_answered': thread['is_staff_answered']
+        })
+    
+    # Structure thread data
+    return {
+        'id': thread['id'],
+        'title': thread['title'],
+        'content': thread['document'],
+        'type': thread['type'],
+        'category': thread['category'],
+        'created_at': thread['created_at'],
+        'is_answered': thread['is_answered'],
+        'is_staff_answered': thread['is_staff_answered'],
+        'answers': answers
+    }
+
 def main():
     """Main execution function."""
     page, browser, playwright, thread_links = login_to_ed()
     try:
         if thread_links:
-            print("\nCollected thread links:")
-            for i, link in enumerate(thread_links, 1):
-                print(f"{i}. {link}")
+            print("\nCollecting thread data...")
+            all_thread_data = []
+            
+            for link in thread_links:
+                thread_id = link.split('/')[-1]
+                thread_data = get_thread_data(page, thread_id)
+                if thread_data:
+                    structured_data = extract_thread_data(thread_data)
+                    all_thread_data.append(structured_data)
+                    print(f"Collected data for thread {thread_id}")
+            
+            print(f"\nTotal threads processed: {len(all_thread_data)}")
+            # TODO: Save to vector database
+                
     finally:
         if browser:
             browser.close()
