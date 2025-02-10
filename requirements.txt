@@ -1,3 +1,2 @@
-agentql==1.8.0
-python-dotenv==1.0.0
-playwright==1.38.0
+requests
+python-dotenv

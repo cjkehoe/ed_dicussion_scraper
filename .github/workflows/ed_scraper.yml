@@ -1,0 +1,31 @@
+name: Ed Discussion Scraper
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'  # Runs every 12 hours
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create .env file
+      run: |
+        echo "ED_EMAIL=${{ secrets.ED_EMAIL }}" >> .env
+        echo "ED_PASSWORD=${{ secrets.ED_PASSWORD }}" >> .env
+    
+    - name: Run scraper
+      run: python reverse_api.py 
