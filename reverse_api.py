@@ -2,32 +2,35 @@ import requests
 import json
 import os
 from dotenv import load_dotenv
+import re
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables at the start
 load_dotenv()
 
 def check_login_type(email):
-    # API endpoint
-    url = "https://us.edstem.org/api/login_type"
+    """Check the login type for the given email address.
     
-    # Headers to mimic browser request
+    Args:
+        email (str): The email address to check
+        
+    Returns:
+        dict: The login type response from Ed or None if request fails
+    """
+    url = "https://us.edstem.org/api/login_type"
     headers = {
         'accept': '*/*',
-        'accept-language': 'en-US,en;q=0.9',
         'content-type': 'application/json',
-        'dnt': '1',
         'origin': 'https://edstem.org',
-        'priority': 'u=1, i',
-        'sec-ch-ua': '"Not A(Brand";v="8", "Chromium";v="132"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"macOS"',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-site',
-        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
     }
     
-    # Request payload
     payload = {
         "login": email,
         "force_code": False,
@@ -35,50 +38,30 @@ def check_login_type(email):
     }
     
     try:
-        # Make POST request
         response = requests.post(url, headers=headers, json=payload)
-        
-        # Print detailed response information
-        print("\nResponse Status Code:", response.status_code)
-        print("\nResponse Headers:")
-        for header, value in response.headers.items():
-            print(f"{header}: {value}")
-        print("\nRaw Response Content:")
-        print(response.text)
-        print("\nParsed JSON Response:")
-        
-        # Check if request was successful
         response.raise_for_status()
-        
-        # Return the JSON response
         return response.json()
-    
     except requests.exceptions.RequestException as e:
-        print(f"Error occurred: {e}")
+        logger.error(f"Login type check failed: {e}")
         return None
 
 def get_token(email, password):
-    # API endpoint
-    url = "https://us.edstem.org/api/token"
+    """Get authentication token using email and password.
     
-    # Headers remain the same as check_login_type
+    Args:
+        email (str): User's email address
+        password (str): User's password
+        
+    Returns:
+        str: Authentication token or None if request fails
+    """
+    url = "https://us.edstem.org/api/token"
     headers = {
         'accept': '*/*',
-        'accept-language': 'en-US,en;q=0.9',
         'content-type': 'application/json',
-        'dnt': '1',
         'origin': 'https://edstem.org',
-        'priority': 'u=1, i',
-        'sec-ch-ua': '"Not A(Brand";v="8", "Chromium";v="132"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"macOS"',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-site',
-        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
     }
     
-    # Request payload for token
     payload = {
         "login": email,
         "password": password
@@ -86,20 +69,10 @@ def get_token(email, password):
     
     try:
         response = requests.post(url, headers=headers, json=payload)
-        
-        # Print detailed response information
-        print("\nToken Request Status Code:", response.status_code)
-        print("\nResponse Headers:")
-        for header, value in response.headers.items():
-            print(f"{header}: {value}")
-        print("\nRaw Response Content:")
-        print(response.text)
-        
         response.raise_for_status()
         return response.json()
-        
     except requests.exceptions.RequestException as e:
-        print(f"Error occurred during token request: {e}")
+        logger.error(f"Token request failed: {e}")
         return None
 
 def get_all_thread_links(token, course_id="72657"):
@@ -166,74 +139,210 @@ def get_thread_data(token, thread_id):
         print(f"Error fetching thread data: {str(e)}")
         return None
 
+def clean_content(content):
+    """Clean and prepare content for embedding."""
+    if not content:
+        return ""
+        
+    try:
+        # Remove excessive newlines
+        content = re.sub(r'\n{3,}', '\n\n', content)
+        
+        # Handle Unicode characters directly instead of using encode/decode
+        content = content.replace('\\u2013', '–')  # Replace em-dash
+        content = content.replace('\\u2014', '—')  # Replace en-dash
+        content = content.replace('\\u2018', ''')  # Replace single quotes
+        content = content.replace('\\u2019', ''')
+        content = content.replace('\\u201C', '"')  # Replace double quotes
+        content = content.replace('\\u201D', '"')
+        
+        # Add space after periods if missing
+        content = re.sub(r'\.(?=[A-Z])', '. ', content)
+        
+        # Replace newlines with spaces
+        content = content.replace('\n', ' ')
+        
+        # Remove any remaining control characters
+        content = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', content)
+        
+        # Remove any remaining backslash escapes
+        content = re.sub(r'\\[nrt]', ' ', content)
+        
+        # Normalize whitespace
+        content = ' '.join(content.split())
+        
+        return content.strip()
+        
+    except Exception as e:
+        print(f"Warning: Error cleaning content: {e}")
+        return content.strip() if content else ""
+
 def extract_thread_data(thread_data):
-    """Extract relevant data from thread API response."""
+    """Extract and structure relevant data from thread API response for RAG ingestion."""
     thread = thread_data['thread']
+    users = {user['id']: user for user in thread_data.get('users', [])}
     
-    # Extract answers
-    answers = []
-    for answer in thread.get('answers', []):
-        answers.append({
-            'id': answer['id'],
-            'content': answer['document'],
-            'is_endorsed': answer['is_endorsed'],
-            'created_at': answer['created_at'],
-            'is_staff_answered': thread['is_staff_answered']
-        })
+    # Build the main content string that will be embedded
+    content_parts = [
+        f"Question: {clean_content(thread['title'])}",
+        clean_content(thread['document'])
+    ]
     
-    # Structure thread data
-    return {
-        'id': thread['id'],
+    # Add answers if they exist
+    if thread['answers']:
+        for answer in thread['answers']:
+            answer_prefix = []
+            # Add metadata about the answer
+            if answer['is_endorsed']:
+                answer_prefix.append("ENDORSED")
+            user = users.get(answer['user_id'])
+            if user and user.get('course_role') in ['admin', 'staff']:
+                answer_prefix.append("STAFF RESPONSE")
+            
+            prefix_str = f"[{' | '.join(answer_prefix)}] " if answer_prefix else ""
+            content_parts.append(f"\nAnswer: {prefix_str}{clean_content(answer['document'])}")
+    
+    # Combine all parts into a single string
+    combined_content = "\n\n".join(content_parts)
+    
+    # Structure metadata for search context
+    metadata = {
+        'thread_id': thread['id'],
         'title': thread['title'],
-        'content': thread['document'],
-        'type': thread['type'],
-        'category': thread['category'],
-        'created_at': thread['created_at'],
+        'created_at': thread['created_at'].split('+')[0],
         'is_answered': thread['is_answered'],
         'is_staff_answered': thread['is_staff_answered'],
-        'answers': answers
+        'category': thread['category'],
+        'subcategory': thread['subcategory'],
+        'answer_count': len(thread['answers']),
+        'view_count': thread['view_count']
+    }
+    
+    return {
+        'content': combined_content,
+        'metadata': metadata
     }
 
+def send_to_chatbot(processed_threads):
+    """Send processed threads to the chatbot API endpoint."""
+    url = 'http://localhost:3000/api/ingest-batch'
+    
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        response = requests.post(url, json=processed_threads, headers=headers)
+        response.raise_for_status()
+        print(f"\nSuccessfully sent {len(processed_threads)} threads to API")
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending data to API: {e}")
+        return None
+
+def get_existing_thread_ids():
+    """Fetch list of thread IDs that are already in the database.
+    
+    Returns:
+        set: Set of thread IDs (as strings) or None if request fails
+    """
+    url = 'http://localhost:3000/api/existing-threads'
+    
+    try:
+        logger.info("Fetching existing thread IDs from database...")
+        response = requests.get(url)
+        response.raise_for_status()
+        thread_ids = response.json()['threadIds']
+        logger.info(f"Found {len(thread_ids)} existing threads in database")
+        return set(str(id) for id in thread_ids)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching existing thread IDs: {e}")
+        return None
+
 def main():
-    """Main execution function using environment variables for authentication."""
+    """Main execution function to fetch and process new Ed Discussion threads."""
+    # Load credentials
     email = os.getenv('ED_EMAIL')
     password = os.getenv('ED_PASSWORD')
     
     if not email or not password:
-        print("Error: ED_EMAIL and ED_PASSWORD must be set in .env file")
+        logger.error("ED_EMAIL and ED_PASSWORD must be set in .env file")
         return
-        
-    login_result = check_login_type(email)
     
-    if login_result and login_result.get("type") == "password":
-        token_result = get_token(email, password)
+    # Get existing thread IDs
+    existing_thread_ids = get_existing_thread_ids()
+    if existing_thread_ids is None:
+        logger.error("Failed to fetch existing thread IDs. Aborting.")
+        return
+    
+    # Authentication
+    login_result = check_login_type(email)
+    if not login_result or login_result.get("type") != "password":
+        logger.error("Login type check failed")
+        return
+    
+    token_result = get_token(email, password)
+    if not token_result or 'token' not in token_result:
+        logger.error("Failed to obtain authentication token")
+        return
+    
+    token = token_result['token']
+    logger.info("Successfully authenticated")
+    
+    # Process threads
+    processed_threads = []
+    offset = 0
+    limit = 30
+    
+    while True:
+        url = f"https://us.edstem.org/api/courses/72657/threads?limit={limit}&offset={offset}&sort=new"
+        logger.info(f"Fetching threads with offset {offset}...")
         
-        if token_result and 'token' in token_result:
-            token = token_result['token']
-            print("\nSuccessfully obtained token!")
+        try:
+            response = requests.get(url, headers={'x-token': token, 'accept': 'application/json'})
+            response.raise_for_status()
+            data = response.json()
             
-            # Get all thread links
-            thread_links = get_all_thread_links(token)
+            if not data.get('threads'):
+                break
             
-            if thread_links:
-                print("\nCollecting thread data...")
-                all_thread_data = []
-                
-                for link in thread_links:
-                    thread_id = link.split('/')[-1]
-                    thread_data = get_thread_data(token, thread_id)
+            threads = data['threads']
+            new_threads = [
+                thread for thread in threads 
+                if str(thread['id']) not in existing_thread_ids
+            ]
+            
+            if not new_threads:
+                logger.info("No new threads found in this batch.")
+                break
+            
+            for thread in new_threads:
+                logger.info(f"Processing new thread {thread['id']}...")
+                try:
+                    thread_data = get_thread_data(token, thread['id'])
                     if thread_data:
-                        structured_data = extract_thread_data(thread_data)
-                        all_thread_data.append(structured_data)
-                        print(f"Collected data for thread {thread_id}")
-                
-                print(f"\nTotal threads processed: {len(all_thread_data)}")
-                # Save data or process further as needed
-                
-                # Example: Print first thread data
-                if all_thread_data:
-                    print("\nFirst thread data sample:")
-                    print(json.dumps(all_thread_data[0], indent=2))
+                        processed_thread = extract_thread_data(thread_data)
+                        processed_threads.append(processed_thread)
+                except Exception as e:
+                    logger.error(f"Error processing thread {thread['id']}: {e}")
+            
+            if len(threads) < limit:
+                break
+            
+            offset += limit
+            logger.info(f"Processed {len(processed_threads)} new threads so far...")
+            
+        except Exception as e:
+            logger.error(f"Error fetching threads: {e}")
+            break
+    
+    # Send processed threads to API
+    if processed_threads:
+        result = send_to_chatbot(processed_threads)
+        if result:
+            logger.info(f"Successfully processed {len(processed_threads)} new threads")
+    else:
+        logger.info("No new threads to process")
 
 if __name__ == "__main__":
     main()
