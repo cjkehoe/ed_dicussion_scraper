@@ -225,10 +225,17 @@ def extract_thread_data(thread_data):
 
 def send_to_chatbot(processed_threads):
     """Send processed threads to the chatbot API endpoint."""
-    url = 'http://localhost:3000/api/ingest-batch'
+    url = 'https://cse-360-rag-chatbot.vercel.app/api/ingest-batch'
+    
+    # Get API key from environment variables
+    api_key = os.getenv('INGESTION_API_KEY')
+    if not api_key:
+        logger.error("INGESTION_API_KEY must be set in .env file")
+        return None
     
     headers = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-api-key': api_key
     }
     
     try:
@@ -240,25 +247,6 @@ def send_to_chatbot(processed_threads):
         print(f"Error sending data to API: {e}")
         return None
 
-def get_existing_thread_ids():
-    """Fetch list of thread IDs that are already in the database.
-    
-    Returns:
-        set: Set of thread IDs (as strings) or None if request fails
-    """
-    url = 'http://localhost:3000/api/existing-threads'
-    
-    try:
-        logger.info("Fetching existing thread IDs from database...")
-        response = requests.get(url)
-        response.raise_for_status()
-        thread_ids = response.json()['threadIds']
-        logger.info(f"Found {len(thread_ids)} existing threads in database")
-        return set(str(id) for id in thread_ids)
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching existing thread IDs: {e}")
-        return None
-
 def main():
     """Main execution function to fetch and process new Ed Discussion threads."""
     # Load credentials
@@ -267,12 +255,6 @@ def main():
     
     if not email or not password:
         logger.error("ED_EMAIL and ED_PASSWORD must be set in .env file")
-        return
-    
-    # Get existing thread IDs
-    existing_thread_ids = get_existing_thread_ids()
-    if existing_thread_ids is None:
-        logger.error("Failed to fetch existing thread IDs. Aborting.")
         return
     
     # Authentication
@@ -307,17 +289,9 @@ def main():
                 break
             
             threads = data['threads']
-            new_threads = [
-                thread for thread in threads 
-                if str(thread['id']) not in existing_thread_ids
-            ]
             
-            if not new_threads:
-                logger.info("No new threads found in this batch.")
-                break
-            
-            for thread in new_threads:
-                logger.info(f"Processing new thread {thread['id']}...")
+            for thread in threads:
+                logger.info(f"Processing thread {thread['id']}...")
                 try:
                     thread_data = get_thread_data(token, thread['id'])
                     if thread_data:
@@ -330,7 +304,7 @@ def main():
                 break
             
             offset += limit
-            logger.info(f"Processed {len(processed_threads)} new threads so far...")
+            logger.info(f"Processed {len(processed_threads)} threads so far...")
             
         except Exception as e:
             logger.error(f"Error fetching threads: {e}")
@@ -340,9 +314,9 @@ def main():
     if processed_threads:
         result = send_to_chatbot(processed_threads)
         if result:
-            logger.info(f"Successfully processed {len(processed_threads)} new threads")
+            logger.info(f"Successfully processed {len(processed_threads)} threads")
     else:
-        logger.info("No new threads to process")
+        logger.info("No threads to process")
 
 if __name__ == "__main__":
     main()

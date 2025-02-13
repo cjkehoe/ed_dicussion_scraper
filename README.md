@@ -6,7 +6,7 @@ A Python script to scrape questions and answers from Ed Discussion boards using 
 
 1. Create a virtual environment:
 ```bash
-python -m venv venv
+python3.11 -m venv venv
 ```
 
 2. Activate the virtual environment:
