@@ -237,6 +237,11 @@ def send_to_chatbot(processed_threads):
         'Content-Type': 'application/json',
         'x-api-key': api_key
     }
+
+    # Add type field to each thread
+    for thread in processed_threads:
+        thread['type'] = 'discussion'
+        thread['metadata']['type'] = 'discussion'
     
     try:
         response = requests.post(url, json=processed_threads, headers=headers)
