@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 import re
 import logging
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -131,6 +132,8 @@ def get_thread_data(token, thread_id):
     url = f"https://us.edstem.org/api/threads/{thread_id}?view=1"
     
     try:
+        # Add delay between requests
+        time.sleep(1)  # Wait 1 second between requests
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         return response.json()
@@ -286,6 +289,8 @@ def main():
         logger.info(f"Fetching threads with offset {offset}...")
         
         try:
+            # Add delay between batch requests
+            time.sleep(2)  # Wait 2 seconds between batch requests
             response = requests.get(url, headers={'x-token': token, 'accept': 'application/json'})
             response.raise_for_status()
             data = response.json()
